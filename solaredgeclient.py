@@ -13,36 +13,17 @@
 #   Which allows to read the scale factors in the modbus table as defined in the Sunspec Protocol
 # Classes are 100% identical
 
-# Revision 16/03/2023
-# Added a battery monitor to record the cumulated energy loaded in the battery and pulled from the battery
-# get access to packages of dbus-modbus-client
-
-# Revision 03/09/2023
-# Added a function to interrupt the program when a file named 'kill' exists in the directory
-# This function calls a method of the batteryMonitor to save the charge and discharde indexes
-# and exit the glibloop
-
-# Revision 01/09/2024
-# Suppression de l'appel au batterymonitor suite à installation indépendente
-
-# Revision du 05/09/2024
-# Modification pour déplacement dans répertoire /data/dbus-solaredge-client
-# et faire suivi des modifications futures par git
-
-# get access to packages of dbus-modbus-client
-import sys
-import os
-#sys.path.insert(1, os.path.join(os.path.dirname(__file__), '/opt/victronenergy/dbus-modbus-client'))
-
 from argparse import ArgumentParser
 import dbus
 import dbus.mainloop.glib
 import faulthandler
+import signal
+import os
+import sys
+import time
 
 import pymodbus.constants
 from settingsdevice import SettingsDevice
-import signal
-import time
 import traceback
 from vedbus import VeDbusService
 from gi.repository import GLib
@@ -64,6 +45,10 @@ VERSION = "1.0"
 
 __all__ = ['NAME', 'VERSION']
 
+FOLDER = os.path.dirname(os.path.abspath(__file__))
+DEF_PATH = "/run/media/sda1"
+LOGFILE = '/projects.log'
+
 pymodbus.constants.Defaults.Timeout = 0.5
 
 #MODBUS_TCP_PORT = 502
@@ -75,7 +60,6 @@ FAILED_INTERVAL = 10
 #MDNS_QUERY_INTERVAL = 60
 #SCAN_INTERVAL = 600
 UPDATE_INTERVAL = 250
-DEFAULT_SAVE_PATH = "/run/media/sda1"
 
 if_blacklist = [
     'ap0',
@@ -103,7 +87,6 @@ class Client(object):
         self.svc = None
         self.watchdog = watchdog.Watchdog()
         self.keep_frozen = False
-        self.battery_monitor = None
     """
     def start_scan(self, full=False):
         if self.scanner:
@@ -152,13 +135,9 @@ class Client(object):
 
         return True
     """
-    def exit_program (self):
-        # to stop the program when needed
-        # save the battery monitor values
-        # delete the file named 'kill'
-        # exit the program
-        log.info('Program terminated on request')
-        log.info('end---------------------------------------------------------')
+    #to nicely end the glib loop
+    def __soft_exit__(self):
+        log.info('terminated on request')
         os._exit(1)
 
     def update_device(self, dev):
@@ -173,24 +152,24 @@ class Client(object):
         except:
             dev.err_count += 1
             if dev.err_count == MAX_ERRORS:
-                log.debug('Error in executing update_devices')
-                log.debug('List of devices before error %s', self.devices)
-                log.debug('Device %s failed', dev)
+                log.debug('error in executing update_devices')
+                log.debug('list of devices before error %s', self.devices)
+                log.debug('device %s failed', dev)
                 if self.err_exit:
                     os._exit(1)
-                log.debug('List of failed before error %s', self.failed)
+                log.debug('list of failed before error %s', self.failed)
                 if not dev.nosave:
                     self.failed.append(str(dev))
-                log.debug('List of failed after error %s', self.failed)
+                log.debug('list of failed after error %s', self.failed)
                 if dev.sunspec_devices:
-                    log.debug('List of sunspec_devices before error %s', dev.sunspec_devices)
+                    log.debug('list of sunspec_devices before error %s', dev.sunspec_devices)
                     for sd in dev.sunspec_devices:
-                        log.debug('Deleting Sunspec_device %s at %s', sd.model, sd)
+                        log.debug('deleting Sunspec_device %s at %s', sd.model, sd)
                         sd.destroy()
                     dev.sunspec_devices.clear()
-                    log.debug('List of sunspec_devices after error %s', dev.sunspec_devices)
+                    log.debug('list of sunspec_devices after error %s', dev.sunspec_devices)
                 self.devices.remove(dev)
-                log.debug('List of devices after error %s', self.devices)
+                log.debug('list of devices after error %s', self.devices)
                 dev.destroy()
 
     def probe_devices(self, devlist, nosave=False):
@@ -199,7 +178,7 @@ class Client(object):
         #print(os.path.abspath(__file__), '>Entering Client.probe_devices')
         # only probe devices that have not been probed yet
         devs = set(devlist) - set(self.devices)
-        log.debug('Devices to probe %s', devs)
+        log.debug('devices to probe %s', devs)
         #print ('devs: ', devs)
         # probe if the device can be contacted and correspond to a known type of device
         # devs = list of recognized devices, 
@@ -207,7 +186,7 @@ class Client(object):
         #   if a device is found a log is made in debug mode
         # failed = list of non recognized devices, each item like [method, ip, port, unit]
         devs, failed = probe.probe(devs)
-        log.debug('Probed devices: devs %s | failed %s', devs, failed)
+        log.debug('probed devices: devs %s | failed %s', devs, failed)
         #print ('devs: ', devs, 'failed: ', failed)
         # initialize all devices that have been found
         for d in devs:
@@ -217,40 +196,40 @@ class Client(object):
                 # We create an init method in the class SunspecDevice to allow
                 # management of multiple devices
                 #print(os.path.abspath(__file__), '>In Client.probe_devices, self.dbusconn', self.dbusconn)0
-                log.debug('List of sunspec_devices %s', d.sunspec_devices)
+                log.debug('list of sunspec_devices %s', d.sunspec_devices)
                 d.init(self.dbusconn)
                 #print(os.path.abspath(__file__), '>In Client.probe_devices, d.init completed')
                 d.nosave = nosave
                 #print(os.path.abspath(__file__), '>In Client.probe_devices, d.nosave set')
                 self.devices.append(d)
                 #print(os.path.abspath(__file__), '>In Client.probe_devices, d ajouté à self.devices')
-                log.debug('List of devices %s', self.devices)
+                log.debug('list of devices %s', self.devices)
                 if d.sunspec_devices:
-                    log.debug('List of sunspec_devices %s', d.sunspec_devices)
+                    log.debug('list of sunspec_devices %s', d.sunspec_devices)
                     for sd in d.sunspec_devices:
-                        log.debug('Sunspec_device %s active at %s', sd.model, sd)
-                #raise TypeError
+                        log.debug('lunspec_device %s active at %s', sd.model, sd)
+            #raise TypeError
             except:
                 #traceback.print_exc() #rajouté pour débugger
-                log.debug('Error in executing probe_devices')
-                log.debug('List of devices before error %s', self.devices)
-                log.debug('Device %s failed', d)
+                log.debug('error in executing probe_devices')
+                log.debug('list of devices before error %s', self.devices)
+                log.debug('device %s failed', d)
                 if self.err_exit:
                     os._exit(1)
-                log.debug('List of failed before error %s', failed)
+                log.debug('list of failed before error %s', failed)
                 failed.append(str(d))
-                log.debug('List of failed after error %s', failed)
+                log.debug('list of failed after error %s', failed)
                 if d.sunspec_devices:
-                    log.debug('List of sunspec_devices before error %s', d.sunspec_devices)
+                    log.debug('list of sunspec_devices before error %s', d.sunspec_devices)
                     for sd in d.sunspec_devices:
-                        log.debug('Deleting Sunspec_device %s at %s', sd.model, sd)
+                        log.debug('deleting Sunspec_device %s at %s', sd.model, sd)
                         sd.destroy()
                     d.sunspec_devices.clear()
-                    log.debug('List of sunspec_devices after error %s', d.sunspec_devices)
+                    log.debug('list of sunspec_devices after error %s', d.sunspec_devices)
                 self.devices.remove(d)
-                log.debug('List of devices after error %s', self.devices)
+                log.debug('list of devices after error %s', self.devices)
                 d.destroy()
-                log.debug('Treatment of error completed successfully, waiting ...')
+                log.debug('treatment of error completed successfully, waiting ...')
         #print(os.path.abspath(__file__), '>In Client.probe_devices')
         #print(os.path.abspath(__file__), 'self.devices, failed: ', self.devices, failed)
         return failed
@@ -315,7 +294,6 @@ class Client(object):
         """
 
         self.watchdog.start()
-        log.info('Initialisation completed')
         
     def update(self):
         """
@@ -350,18 +328,17 @@ class Client(object):
         self.watchdog.update()
         
     def update_timer(self):
+        #if a file named kill exists in the folder of this file, exit the program
+        if os.path.isfile(FOLDER+'/kill'):
+            os.remove(FOLDER+'/kill')
+            self.__soft_exit__()
+
         try:
             self.update()
         except:
-            log.error('Uncaught exception in update', exc_info=True)
+            log.error('uncaught exception in update', exc_info=True)
             #traceback.print_exc()
         
-        # to stop the program when needed
-        # if a file named 'kill' exists in the directory
-         if os.path.isfile(os.getcwd()+'/kill'):
-            os.remove(os.getcwd()+'/kill')
-            self.__exit_program__()
-
         return True
 
 class NetClient(Client):
@@ -420,16 +397,20 @@ def main():
     args = parser.parse_args()
     
     logging.basicConfig(
-        filename=(DEFAULT_SAVE_PATH if os.path.exists(DEFAULT_SAVE_PATH) else os.getcwd()) + '/solaredgeclient.log',
-        format='%(asctime)s: %(levelname)-8s %(message)s', 
+        filename=(DEF_PATH+LOGFILE if os.path.exists(DEF_PATH) else os.path.abspath(__file)+'.log'),
+        format='%(asctime)s - %(levelname)s - %(filename)-8s %(message)s', 
         datefmt="%Y-%m-%d %H:%M:%S", 
         level=logging.INFO)
     """
     logging.basicConfig(filename='sunspec.log', format='%(levelname)-8s %(message)s',
                         level=(logging.DEBUG if args.debug else logging.INFO))
     """
-    log.info('start-------------------------------------------------------')
-    log.info(__file__+' started')
+    log.info('')
+    log.info('------------------------------------------------------------')
+    log.info(
+        f'started, logging to '
+        f'{DEF_PATH+LOGFILE if os.path.exists(DEF_PATH) else os.path.abspath(__file__)+".log"}'
+        )
 
     logging.getLogger('pymodbus.client.sync').setLevel(logging.CRITICAL)
     
