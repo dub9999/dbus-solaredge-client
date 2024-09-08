@@ -144,8 +144,8 @@ class Client(object):
         try:
             # Normally there is no update method in the class of the Device
             # So the method update of the parent (EnergyMeter) is called
-            # We create an update method in the class SunspecDevice to allow
-            # management of multiple devices
+            # We create an update method in the class SunspecHub to define
+            # the various devices to manage
             dev.update()
             dev.err_count = 0
 
@@ -430,6 +430,5 @@ def main():
     GLib.timeout_add(UPDATE_INTERVAL, client.update_timer)
     mainloop.run()
     
-
 if __name__ == '__main__':
     main()
