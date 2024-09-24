@@ -47,7 +47,7 @@ __all__ = ['NAME', 'VERSION']
 
 FOLDER = os.path.dirname(os.path.abspath(__file__))
 DEF_PATH = "/run/media/sda1"
-LOGFILE = '/projects.log'
+LOGFILE = '/solaredgeclient.log'
 
 pymodbus.constants.Defaults.Timeout = 0.5
 
