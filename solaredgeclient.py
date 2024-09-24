@@ -207,7 +207,7 @@ class Client(object):
                 if d.sunspec_devices:
                     log.debug('list of sunspec_devices %s', d.sunspec_devices)
                     for sd in d.sunspec_devices:
-                        log.debug('lunspec_device %s active at %s', sd.model, sd)
+                        log.debug('sunspec_device %s active at %s', sd.model, sd)
             #raise TypeError
             except:
                 #traceback.print_exc() #rajouté pour débugger
@@ -226,7 +226,8 @@ class Client(object):
                         sd.destroy()
                     d.sunspec_devices.clear()
                     log.debug('list of sunspec_devices after error %s', d.sunspec_devices)
-                self.devices.remove(d)
+                if d in devices:
+                    self.devices.remove(d)
                 log.debug('list of devices after error %s', self.devices)
                 d.destroy()
                 log.debug('treatment of error completed successfully, waiting ...')
@@ -337,7 +338,6 @@ class Client(object):
             self.update()
         except:
             log.error('uncaught exception in update', exc_info=True)
-            #traceback.print_exc()
         
         return True
 
